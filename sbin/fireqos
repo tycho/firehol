@@ -1346,6 +1346,10 @@ interface() {
 			exit 1
 		fi
 
+		# Disables link-local IPv6 addresses. Having only a link-local address
+		# makes systemd-networkd think the state of the interface is degraded.
+		sysctl -w net.ipv6.conf.${interface_realdev}.disable_ipv6=1
+
 		# remember we used this interface
 		$TOUCH_CMD $FIREQOS_DIR/ifbs/${interface_realdev}
 
