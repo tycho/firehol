@@ -4421,6 +4421,7 @@ blacklist() {
 	FIREHOL_BLACKLIST_COUNTER=$[ FIREHOL_BLACKLIST_COUNTER + 1 ]
 	local mode=1 chain= name="bi" accounting= x=
 	local -a inface=() src=() logopts_in_arg=(log "BLACKLIST-IN") logopts_out_arg=(log "BLACKLIST-OUT")
+	local forwarded=0
 
 	case "${1}" in
 		them|him|her|it|this|these|input)
@@ -4447,6 +4448,11 @@ blacklist() {
 	while [ ! -z "${1}" ]
 	do
 		case "${1,,}" in
+			forward|forwarded)
+				forwarded=1
+				shift
+				;;
+
 			src)
 				shift
 				;;
@@ -4522,6 +4528,14 @@ blacklist() {
 	rule table filter chain "${chain}.in" in "${logopts_in_arg[@]}" action DROP || return 1
 
 	# ---
+	INCHAINS=(INPUT FORWARD)
+	OUTCHAINS=(OUTPUT FORWARD)
+
+	if [ ${forwarded} -ne 0 ]
+	then
+		INCHAINS=(FORWARD)
+		OUTCHAINS=(FORWARD)
+	fi
 
 	# send traffic from the main flow to the generated chains
 	if [ ${mode} -eq 0 ]
@@ -4531,7 +4545,7 @@ blacklist() {
 
 		set_work_function "Unidirectional blacklist rules"
 
-		for x in INPUT FORWARD
+		for x in ${INCHAINS[@]}
 		do
 			rule table filter chain ${x} in "${inface[@]}" src "${src[*]}" state NEW action "${chain}.in" || return 1
 		done
@@ -4546,7 +4560,7 @@ blacklist() {
 
 		set_work_function "Blacklist input"
 
-		for x in INPUT FORWARD
+		for x in ${INCHAINS[@]}
 		do
 			rule table filter chain ${x}  in "${inface[@]}" src "${src[*]}" ${state} action "${chain}.in" || return 1
 		done
@@ -4584,7 +4598,7 @@ blacklist() {
 		set_work_function "Bidirectional blacklist rules"
 
 		# iptables does not accept REJECT on mangle - we are forced to use filter for this
-		for x in FORWARD OUTPUT
+		for x in ${OUTCHAINS[@]}
 		do
 			rule table filter chain ${x} out reverse "${inface[@]}" src "${src[*]}" ${state} action "${chain}.out" || return 1
 		done
