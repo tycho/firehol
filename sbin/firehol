@@ -4419,7 +4419,7 @@ blacklist() {
 	require_work clear || ( error "${FUNCNAME} cannot be used in '${work_cmd}'. Put it before any '${work_cmd}' definition."; return 1 )
 	
 	FIREHOL_BLACKLIST_COUNTER=$[ FIREHOL_BLACKLIST_COUNTER + 1 ]
-	local mode=1 chain= name="bi" accounting= x=
+	local mode=1 table=filter chain= name="bi" accounting= x=
 	local -a inface=() src=() logopts_in_arg=(log "BLACKLIST-IN") logopts_out_arg=(log "BLACKLIST-OUT")
 
 	case "${1}" in
@@ -4440,7 +4440,12 @@ blacklist() {
 			name="bs"
 			shift
 			;;
-
+		raw)
+			mode=0
+			name="pr"
+			table=raw
+			shift
+			;;
 		*)	;;
 	esac
 	
@@ -4510,18 +4515,24 @@ blacklist() {
 	set_work_function "Blacklist input chain"
 
 	# create the input chain (common for both stateless and stateful)
-	iptables_both -t filter -N "${chain}.in"
+	iptables_both -t ${table} -N "${chain}.in"
 
 	# add the excepted rules
-	if [ ! -z "${1}" ]; then rule table filter chain "${chain}.in" in action RETURN "${@}" || return 1; fi
+	if [ ! -z "${1}" ]; then rule table ${table} chain "${chain}.in" in action RETURN "${@}" || return 1; fi
 
 	# add the accounting rules
-	if [ ! -z "${accounting}" ]; then iptables_both -t filter -A "${chain}.in" -m nfacct --nfacct-name "${accounting}" || return 1; fi
+	if [ ! -z "${accounting}" ]; then iptables_both -t ${table} -A "${chain}.in" -m nfacct --nfacct-name "${accounting}" || return 1; fi
 
 	# drop the traffic (input)
-	rule table filter chain "${chain}.in" in "${logopts_in_arg[@]}" action DROP || return 1
+	rule table ${table} chain "${chain}.in" in "${logopts_in_arg[@]}" action DROP || return 1
 
 	# ---
+
+	if [ "${table}" == "raw" ]
+	then
+		INCHAINS=(PREROUTING)
+		OUTCHAINS=()
+	fi
 
 	# send traffic from the main flow to the generated chains
 	if [ ${mode} -eq 0 ]
@@ -4533,7 +4544,7 @@ blacklist() {
 
 		for x in INPUT FORWARD
 		do
-			rule table filter chain ${x} in "${inface[@]}" src "${src[*]}" state NEW action "${chain}.in" || return 1
+			rule table ${table} chain ${x} in "${inface[@]}" src "${src[*]}" state NEW action "${chain}.in" || return 1
 		done
 
 	else
@@ -8050,6 +8061,11 @@ rule() {
 		fi
 	fi
 
+	# The raw table happens before conntrack, so the "state" is irrelevant.
+	if [ "${table}" = "raw" ]
+	then
+		state=
+	fi
 
 	# if there are custom arguments, keep the procol with it
 	[ ! -z "${custom}" -a "${require_protocol_with_action[*]}" = "any" ] && require_protocol_with_action=("${proto[@]}")
