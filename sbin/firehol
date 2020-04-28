@@ -1198,8 +1198,7 @@ firehol_exit() {
 	then
 		if [ ! -z "${FIREHOL_NOTIFICATION_PROGRAM}" -a -x "${FIREHOL_NOTIFICATION_PROGRAM}" ]
 		then
-			# we just fork it, so that it will not depend on terminal conditions
-			"${FIREHOL_NOTIFICATION_PROGRAM}" "${FIREHOL_CONFIG}" "${result}" "${restored}" "${work_error}" "${work_runtime_error}" >/dev/null 2>&1 </dev/null &
+			"${FIREHOL_NOTIFICATION_PROGRAM}" "${FIREHOL_CONFIG}" "${result}" "${restored}" "${work_error}" "${work_runtime_error}" >/dev/null 2>&1 </dev/null
 		fi
 	fi
 
@@ -4419,8 +4418,9 @@ blacklist() {
 	require_work clear || ( error "${FUNCNAME} cannot be used in '${work_cmd}'. Put it before any '${work_cmd}' definition."; return 1 )
 	
 	FIREHOL_BLACKLIST_COUNTER=$[ FIREHOL_BLACKLIST_COUNTER + 1 ]
-	local mode=1 chain= name="bi" accounting= x=
+	local mode=1 table=filter chain= name="bi" accounting= x=
 	local -a inface=() src=() logopts_in_arg=(log "BLACKLIST-IN") logopts_out_arg=(log "BLACKLIST-OUT")
+	local forwarded=0
 
 	case "${1}" in
 		them|him|her|it|this|these|input)
@@ -4440,13 +4440,23 @@ blacklist() {
 			name="bs"
 			shift
 			;;
-
+		raw)
+			mode=0
+			name="pr"
+			table=raw
+			shift
+			;;
 		*)	;;
 	esac
 	
 	while [ ! -z "${1}" ]
 	do
 		case "${1,,}" in
+			forward|forwarded)
+				forwarded=1
+				shift
+				;;
+
 			src)
 				shift
 				;;
@@ -4510,18 +4520,32 @@ blacklist() {
 	set_work_function "Blacklist input chain"
 
 	# create the input chain (common for both stateless and stateful)
-	iptables_both -t filter -N "${chain}.in"
+	iptables_both -t ${table} -N "${chain}.in"
 
 	# add the excepted rules
-	if [ ! -z "${1}" ]; then rule table filter chain "${chain}.in" in action RETURN "${@}" || return 1; fi
+	if [ ! -z "${1}" ]; then rule table ${table} chain "${chain}.in" in action RETURN "${@}" || return 1; fi
 
 	# add the accounting rules
-	if [ ! -z "${accounting}" ]; then iptables_both -t filter -A "${chain}.in" -m nfacct --nfacct-name "${accounting}" || return 1; fi
+	if [ ! -z "${accounting}" ]; then iptables_both -t ${table} -A "${chain}.in" -m nfacct --nfacct-name "${accounting}" || return 1; fi
 
 	# drop the traffic (input)
-	rule table filter chain "${chain}.in" in "${logopts_in_arg[@]}" action DROP || return 1
+	rule table ${table} chain "${chain}.in" in "${logopts_in_arg[@]}" action DROP || return 1
 
 	# ---
+	INCHAINS=(INPUT FORWARD)
+	OUTCHAINS=(OUTPUT FORWARD)
+
+	if [ ${forwarded} -ne 0 ]
+	then
+		INCHAINS=(FORWARD)
+		OUTCHAINS=(FORWARD)
+	fi
+
+	if [ "${table}" == "raw" ]
+	then
+		INCHAINS=(PREROUTING)
+		OUTCHAINS=()
+	fi
 
 	# send traffic from the main flow to the generated chains
 	if [ ${mode} -eq 0 ]
@@ -4531,9 +4555,9 @@ blacklist() {
 
 		set_work_function "Unidirectional blacklist rules"
 
-		for x in INPUT FORWARD
+		for x in ${INCHAINS[@]}
 		do
-			rule table filter chain ${x} in "${inface[@]}" src "${src[*]}" state NEW action "${chain}.in" || return 1
+			rule table ${table} chain ${x} in "${inface[@]}" src "${src[*]}" state NEW action "${chain}.in" || return 1
 		done
 
 	else
@@ -4546,7 +4570,7 @@ blacklist() {
 
 		set_work_function "Blacklist input"
 
-		for x in INPUT FORWARD
+		for x in ${INCHAINS[@]}
 		do
 			rule table filter chain ${x}  in "${inface[@]}" src "${src[*]}" ${state} action "${chain}.in" || return 1
 		done
@@ -4584,7 +4608,7 @@ blacklist() {
 		set_work_function "Bidirectional blacklist rules"
 
 		# iptables does not accept REJECT on mangle - we are forced to use filter for this
-		for x in FORWARD OUTPUT
+		for x in ${OUTCHAINS[@]}
 		do
 			rule table filter chain ${x} out reverse "${inface[@]}" src "${src[*]}" ${state} action "${chain}.out" || return 1
 		done
@@ -8050,6 +8074,11 @@ rule() {
 		fi
 	fi
 
+	# The raw table happens before conntrack, so the "state" is irrelevant.
+	if [ "${table}" = "raw" ]
+	then
+		state=
+	fi
 
 	# if there are custom arguments, keep the procol with it
 	[ ! -z "${custom}" -a "${require_protocol_with_action[*]}" = "any" ] && require_protocol_with_action=("${proto[@]}")
