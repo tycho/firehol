@@ -1198,8 +1198,7 @@ firehol_exit() {
 	then
 		if [ ! -z "${FIREHOL_NOTIFICATION_PROGRAM}" -a -x "${FIREHOL_NOTIFICATION_PROGRAM}" ]
 		then
-			# we just fork it, so that it will not depend on terminal conditions
-			"${FIREHOL_NOTIFICATION_PROGRAM}" "${FIREHOL_CONFIG}" "${result}" "${restored}" "${work_error}" "${work_runtime_error}" >/dev/null 2>&1 </dev/null &
+			"${FIREHOL_NOTIFICATION_PROGRAM}" "${FIREHOL_CONFIG}" "${result}" "${restored}" "${work_error}" "${work_runtime_error}" >/dev/null 2>&1 </dev/null
 		fi
 	fi
 
